@@ -1,0 +1,27 @@
+# =============================================
+# Requirements for MedSigLIP Fine-Tuning
+# =============================================
+
+# Core Deep Learning
+torch>=2.1.0
+torchvision>=0.16.0
+
+# Hugging Face ecosystem
+transformers>=4.40.0
+accelerate>=0.27.0
+datasets>=2.18.0
+
+# Image processing
+Pillow>=10.0.0
+opencv-python>=4.8.0
+
+# Data science / splitting
+scikit-learn>=1.3.0
+numpy>=1.24.0
+
+# Logging & progress
+tqdm>=4.66.0
+
+# Optional: experiment tracking
+# wandb>=0.16.0
+# tensorboard>=2.15.0
