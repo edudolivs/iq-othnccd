@@ -4,7 +4,7 @@ test_medgemma.py
 Loads lung CT images from data/{benign, malignant, normal}/ and sends them
 to a MedGemma endpoint on Vertex AI for classification inference.
 
-The model is prompted to classify each image as: normal, benign, or malignant.
+The model is prompted to classify each image as: non-malignant or malignant.
 
 Prerequisites:
     pip install google-cloud-aiplatform Pillow
@@ -38,16 +38,16 @@ LOCATION = os.environ.get("VERTEX_LOCATION", "")
 ENDPOINT_ID = os.environ.get("VERTEX_ENDPOINT_ID", "")
 # ───────────────────────────────────────────────────────────────────────
 
-CLASS_NAMES = ["benign", "malignant", "normal"]
+DATA_DIRS = ["benign", "malignant", "normal"]
+TARGET_CLASSES = ["non-malignant", "malignant"]
 
 PROMPT = (
     "You are a medical imaging expert. Analyze this lung CT scan image and "
     "classify it into exactly one of the following categories:\n"
-    "- normal: no abnormalities detected\n"
-    "- benign: a benign lesion or nodule is present\n"
+    "- non-malignant: no abnormalities detected, or a benign lesion/nodule is present\n"
     "- malignant: a malignant lesion or tumor is present\n\n"
-    "Respond with ONLY the classification label (normal, benign, or malignant) "
-    "on the first line, followed by a brief explanation on the next line."
+    "Respond with ONLY the classification label (non-malignant or malignant) on the first line, "
+    "followed by a brief explanation on the next line."
 )
 
 
@@ -84,17 +84,20 @@ def collect_images(data_dir: str) -> list[dict]:
     data_path = Path(data_dir)
     images = []
 
-    for class_name in CLASS_NAMES:
-        class_dir = data_path / class_name
+    for folder_name in DATA_DIRS:
+        class_dir = data_path / folder_name
         if not class_dir.is_dir():
             print(f"[WARNING] Directory not found: {class_dir}")
             continue
+
+        # Map benign/normal to non-malignant
+        true_label = "malignant" if folder_name == "malignant" else "non-malignant"
 
         for img_file in sorted(class_dir.iterdir()):
             if img_file.suffix.lower() in (".jpg", ".jpeg"):
                 images.append({
                     "path": str(img_file),
-                    "true_label": class_name,
+                    "true_label": true_label,
                     "filename": img_file.name,
                 })
 
@@ -185,19 +188,21 @@ def call_medgemma(endpoint: aiplatform.Endpoint, image_path: str) -> dict:
 def parse_label(response_text: str) -> str:
     """
     Extract the classification label from the model's response.
-    Looks for 'normal', 'benign', or 'malignant' in the first line.
+    Looks for 'non-malignant' or 'malignant'.
     """
     first_line = response_text.strip().split("\n")[0].lower().strip()
 
-    for label in CLASS_NAMES:
-        if label in first_line:
-            return label
+    if "non-malignant" in first_line or "non malignant" in first_line:
+        return "non-malignant"
+    elif "malignant" in first_line:
+        return "malignant"
 
     # If no exact match in first line, search the entire response
     response_lower = response_text.lower()
-    for label in CLASS_NAMES:
-        if label in response_lower:
-            return label
+    if "non-malignant" in response_lower or "non malignant" in response_lower:
+        return "non-malignant"
+    elif "malignant" in response_lower:
+        return "malignant"
 
     return "unknown"
 
@@ -214,7 +219,7 @@ def compute_metrics(results: list[dict]) -> dict:
         "per_class": {},
     }
 
-    for class_name in CLASS_NAMES:
+    for class_name in TARGET_CLASSES:
         class_results = [r for r in results if r["true_label"] == class_name]
         class_correct = sum(1 for r in class_results if r["predicted_label"] == class_name)
         class_total = len(class_results)
@@ -269,7 +274,7 @@ def print_metrics(metrics: dict):
     print("-" * 60)
     print(f"   {'Class':<12} {'Total':>6} {'Correct':>8} {'Recall':>8} {'Precision':>10}")
     print("-" * 60)
-    for class_name in CLASS_NAMES:
+    for class_name in TARGET_CLASSES:
         c = metrics["per_class"][class_name]
         print(
             f"   {class_name:<12} {c['total']:>6} {c['correct']:>8} "
@@ -322,9 +327,9 @@ def main():
     all_images = collect_images(args.data_dir)
     print(f"   Total images found: {len(all_images)}")
 
-    for class_name in CLASS_NAMES:
-        count = sum(1 for img in all_images if img["true_label"] == class_name)
-        print(f"   - {class_name}: {count}")
+    for target_class in TARGET_CLASSES:
+        count = sum(1 for img in all_images if img["true_label"] == target_class)
+        print(f"   - {target_class}: {count}")
 
     if not all_images:
         print("❌ No images found. Check your data directory.")
@@ -333,7 +338,7 @@ def main():
     # Apply max_images limit per class
     if args.max_images:
         limited_images = []
-        for class_name in CLASS_NAMES:
+        for class_name in TARGET_CLASSES:
             class_imgs = [img for img in all_images if img["true_label"] == class_name]
             limited_images.extend(class_imgs[: args.max_images])
         all_images = limited_images
